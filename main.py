@@ -10,6 +10,8 @@ import cairosvg
 from io import BytesIO
 from PIL import Image
 
+from estimate_resistors import estimate_resistors, estimate_resistors_fast
+
 # --- Config ---
 USE_MOCK = False             # Set to False to use real serial data
 SERIAL_PORT = '/dev/cu.SLAB_USBtoUART'
@@ -37,11 +39,12 @@ def read_from_serial(ser):
     Reads a 18x12 matrix of integers from serial.
     Expected format: 18 lines of comma-separated values, each with 12 integers.
     """
-    try:
-        line = ser.readline().decode('utf-8').strip()
-    except UnicodeDecodeError:
-        print('decode error')
-        line = None
+    line = None
+    while not line or ser.in_waiting:
+        try:
+            line = ser.readline().decode('utf-8').strip()
+        except UnicodeDecodeError:
+            print('decode error')
 
     matrix = np.zeros(MESSAGE_LENGTH)
 
@@ -58,7 +61,7 @@ def read_from_serial(ser):
 
 def visualize_heatmap_as_grid(matrix):
     plt.clf()
-    plt.imshow(matrix, cmap='hot', interpolation='nearest', vmin=0, vmax=100)
+    plt.imshow(matrix, cmap='hot', interpolation='nearest', vmin=0, vmax=50000)
     plt.colorbar(label='Sensor Value')
     plt.yticks(np.arange(18))
     plt.xticks(np.arange(12))
@@ -125,12 +128,17 @@ def main():
         while True:
             matrix = generate_mock_data() if USE_MOCK else read_from_serial(ser)
 
-            max = np.maximum(max, matrix, out=max, where=matrix<4096.0)
-            min = np.minimum(min, matrix, out=min, where=matrix>0.0)
+            # max = np.maximum(max, matrix, out=max, where=matrix<4096.0)
+            # min = np.minimum(min, matrix, out=min, where=matrix>0.0)
 
-            matrix = (matrix - min) / (max - min) * 100
+            # matrix_norm = (matrix - min) / (max - min) * 100
+            
+            if not (matrix == 0).any():
+                estimated_resistances = estimate_resistors(R_eq=matrix, init=matrix, tol=1e-9, verbose=False)
+                # estimated_resistances = estimate_resistors_fast(R_eq=matrix, init='uniform', tol=1e-9, verbose=True, sparse=False)
+                print('solved')
+                visualize_heatmap_as_grid(estimated_resistances)
 
-            visualize_heatmap_as_grid(matrix)
     except KeyboardInterrupt:
         print("Exiting...")
     finally:
