@@ -11,8 +11,8 @@ from io import BytesIO
 from PIL import Image
 
 # --- Config ---
-USE_MOCK = True             # Set to False to use real serial data
-SERIAL_PORT = '/dev/cu.usbserial-0001'
+USE_MOCK = False             # Set to False to use real serial data
+SERIAL_PORT = '/dev/cu.SLAB_USBtoUART'
 BAUD_RATE = 115200
 ROWS, COLS = 18, 12
 SHAPE = ROWS, COLS
@@ -37,23 +37,31 @@ def read_from_serial(ser):
     Reads a 18x12 matrix of integers from serial.
     Expected format: 18 lines of comma-separated values, each with 12 integers.
     """
-    line = ser.readline().decode('utf-8').strip()
+    try:
+        line = ser.readline().decode('utf-8').strip()
+    except UnicodeDecodeError:
+        print('decode error')
+        line = None
+
     matrix = np.zeros(MESSAGE_LENGTH)
+
     if line:
         try:
             line = list(map(int, line.split(',')))
             if len(line) == MESSAGE_LENGTH:
                 matrix = np.array(line, dtype='int')
-                print(matrix[0])
+                # print(matrix[0])
         except ValueError:
-            print('value error')
+            print('value error', line)
             pass
     return np.reshape(matrix, SHAPE)
 
 def visualize_heatmap_as_grid(matrix):
     plt.clf()
-    plt.imshow(matrix, cmap='hot', interpolation='nearest', vmin=0, vmax=3000)
+    plt.imshow(matrix, cmap='hot', interpolation='nearest', vmin=0, vmax=100)
     plt.colorbar(label='Sensor Value')
+    plt.yticks(np.arange(18))
+    plt.xticks(np.arange(12))
     plt.title('Twister Sensor Heatmap')
     plt.pause(0.1)
 
@@ -110,10 +118,19 @@ def main():
     plt.ion()
     fig = plt.figure()
 
+    max = np.full(SHAPE, 0, dtype=float)
+    min = np.full(SHAPE, 4096, dtype=float)
+
     try:
         while True:
             matrix = generate_mock_data() if USE_MOCK else read_from_serial(ser)
-            visualize_heatmap(matrix)
+
+            max = np.maximum(max, matrix, out=max, where=matrix<4096.0)
+            min = np.minimum(min, matrix, out=min, where=matrix>0.0)
+
+            matrix = (matrix - min) / (max - min) * 100
+
+            visualize_heatmap_as_grid(matrix)
     except KeyboardInterrupt:
         print("Exiting...")
     finally:
