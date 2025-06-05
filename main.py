@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import asyncio
 import websockets
 import json
@@ -11,6 +10,7 @@ from estimate_resistors import estimate_resistors, estimate_resistors_fast
 # --- Config ---
 USE_MOCK = False             # Set to False to use real serial data
 ANTI_CROSSTALK = True
+WEBSOCKET_PORT = 8765
 SERIAL_PORT = '/dev/cu.SLAB_USBtoUART'
 BAUD_RATE = 115200
 
@@ -20,7 +20,6 @@ MESSAGE_LENGTH = ROWS * COLS
 
 SERIAL_BEGIN_SEQ = 'START'
 
-debug = True
 
 def generate_mock_data():
     """Simulate a 12x18 matrix of sensor readings (0-1023)."""
@@ -81,9 +80,6 @@ async def main_loop(websocket):
         await ser.readuntil(SERIAL_BEGIN_SEQ.encode())
         print('Start sequence received')
 
-    # plt.ion()
-    # fig = plt.figure()
-
     try:
         while True:
             if USE_MOCK:
@@ -107,14 +103,10 @@ async def main_loop(websocket):
 
     except KeyboardInterrupt:
         print("Exiting...")
-    finally:
-        # plt.ioff()
-        # plt.close()
-        pass
 
 async def main():
-    async with websockets.serve(main_loop, "localhost", 8765):
-        print("WebSocket server running at ws://localhost:8765")
+    async with websockets.serve(main_loop, "localhost", WEBSOCKET_PORT):
+        print(f"WebSocket server running at ws://localhost:{WEBSOCKET_PORT}")
         await asyncio.Future()
 
 if __name__ == '__main__':
