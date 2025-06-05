@@ -1,14 +1,17 @@
+import typing
+
 import numpy as np
 import matplotlib.pyplot as plt
-import serial
-import time
-import random
 
 import xml.etree.ElementTree as ET
 import matplotlib.colors as colors
 import cairosvg
 from io import BytesIO
 from PIL import Image
+import asyncio
+import websockets
+import json
+import serial_asyncio
 
 from estimate_resistors import estimate_resistors, estimate_resistors_fast
 
@@ -34,17 +37,16 @@ def generate_mock_data():
     """Simulate a 12x18 matrix of sensor readings (0-1023)."""
     return np.random.randint(0, 1024, size=(ROWS, COLS))
 
-def read_from_serial(ser):
+async def read_from_serial(ser):
     """
     Reads a 18x12 matrix of integers from serial.
     Expected format: 18 lines of comma-separated values, each with 12 integers.
     """
-    line = None
-    while not line or ser.in_waiting:
-        try:
-            line = ser.readline().decode('utf-8').strip()
-        except UnicodeDecodeError:
-            print('decode error')
+    try:
+        line = (await ser.readline()).decode('utf-8').strip()
+    except UnicodeDecodeError:
+        print('decode error')
+        line = None
 
     matrix = np.zeros(MESSAGE_LENGTH)
 
@@ -107,45 +109,49 @@ def visualize_heatmap(matrix):
     plt.title('Twister Sensor Heatmap')
     plt.pause(0.1)
 
-def main():
+async def main_loop(websocket):
     if USE_MOCK:
         print("Running with mock data...")
         ser = None
     else:
         print("Connecting to serial...")
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=5)
-        time.sleep(2)  # Give time for Arduino to reset
-        ser.read_until(BEGIN_SERIAL_SEQ)
+        conn : typing.Tuple[asyncio.StreamReader, typing.Any] = await serial_asyncio.open_serial_connection(
+            url=SERIAL_PORT, baudrate=BAUD_RATE
+        )
+        ser = conn[0]
+        await ser.readuntil(BEGIN_SERIAL_SEQ.encode())
         print('Start sequence received')
 
     plt.ion()
     fig = plt.figure()
 
-    max = np.full(SHAPE, 0, dtype=float)
-    min = np.full(SHAPE, 4096, dtype=float)
-
     try:
         while True:
             matrix = generate_mock_data() if USE_MOCK else read_from_serial(ser)
 
-            # max = np.maximum(max, matrix, out=max, where=matrix<4096.0)
-            # min = np.minimum(min, matrix, out=min, where=matrix>0.0)
-
-            # matrix_norm = (matrix - min) / (max - min) * 100
-            
             if not (matrix == 0).any():
                 estimated_resistances = estimate_resistors(R_eq=matrix, init=matrix, tol=1e-9, verbose=False)
                 # estimated_resistances = estimate_resistors_fast(R_eq=matrix, init='uniform', tol=1e-9, verbose=True, sparse=False)
                 print('solved')
                 visualize_heatmap_as_grid(estimated_resistances)
 
+            metadata = {
+                "shape": matrix.shape,
+                "dtype": str(matrix.dtype)
+            }
+            await websocket.send(json.dumps(metadata))
+            await websocket.send(matrix.tobytes())
+
     except KeyboardInterrupt:
         print("Exiting...")
     finally:
-        if ser:
-            ser.close()
         plt.ioff()
         plt.close()
 
-if __name__ == "__main__":
-    main()
+async def main():
+    async with websockets.serve(main_loop, "localhost", 8765):
+        print("WebSocket server running at ws://localhost:8765")
+        await asyncio.Future()
+
+if __name__ == '__main__':
+    asyncio.run(main())
