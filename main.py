@@ -54,7 +54,7 @@ async def read_from_serial(ser):
         try:
             line = list(map(int, line.split(',')))
             if len(line) == MESSAGE_LENGTH:
-                matrix = np.array(line, dtype='int')
+                matrix = np.array(line, dtype='float')
                 # print(matrix[0])
         except ValueError:
             print('value error', line)
@@ -127,7 +127,7 @@ async def main_loop(websocket):
 
     try:
         while True:
-            matrix = generate_mock_data() if USE_MOCK else read_from_serial(ser)
+            matrix = generate_mock_data() if USE_MOCK else (await read_from_serial(ser))
 
             if not (matrix == 0).any():
                 estimated_resistances = estimate_resistors(R_eq=matrix, init=matrix, tol=1e-9, verbose=False)
